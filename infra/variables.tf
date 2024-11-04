@@ -13,3 +13,8 @@ variable "region" {
   description = "The region to deploy the resources to"
 }
 
+variable "platform_name" {
+  type     = string
+  nullable = false
+  default  = "Resume"
+}
