@@ -1,0 +1,91 @@
+name: "Pull Request To Main"
+
+on:
+  pull_request:
+    branches:
+      - main
+
+env:
+  TF_LOG: INFO
+  TF_INPUT: false
+
+jobs:
+  terraform:
+    name: "Terraform Plan"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: ./infra
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # checkout our repo
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      # install terraform version
+      - name: Setup terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ secrets.TERRAFORM_VERSION }}
+
+      # initialise the terraform config
+      - name: Terraform Init
+        id: init
+        env:
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+          RESOURCE_GROUP: ${{ secrets.RESOURCE_GROUP }}
+          STORAGE_ACCOUNT: ${{ secrets.STORAGE_ACCOUNT }}
+          CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
+        run: terraform init -backend-config="storage_account_name=$STORAGE_ACCOUNT" -backend-config="container_name=$CONTAINER_NAME" -backend-config="resource_group_name=$RESOURCE_GROUP"
+
+      # quick syntax check
+      - name: Terraform Format
+        id: fmt
+        run: terraform fmt -check -recursive
+
+      # validate our configurations
+      - name: Terraform validate
+        id: validate
+        if: success() || failure()
+        run: terraform validate
+
+      # run tf plan
+      - name: Terraform Plan
+        id: plan
+        env:
+          ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        run: terraform plan -var-file="../../envs/dev.tfvars" -state="resapp.dev.tfstate"
+
+      # add a comment to PR with the plan
+      - name: Comment with Plan
+        id: comment
+        uses: actions/github-script/@v6
+        env:
+          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Initialisation ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Plan \`${{ steps.plan.outcome }}\`
+
+            Show Plan
+
+            \`\`\`${process.env.PLAN}\`\`\`
+
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`, Workflow: \`${{ github.workflow }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo_owner,
+              repo: context.repo.repo,
+              body: output
+            })
