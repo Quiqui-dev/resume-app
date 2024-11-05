@@ -6,4 +6,9 @@ terraform {
       version = ">=3.97.1"
     }
   }
+
+  backend "azurerm" {
+    key = "terraform.tfstate"
+  }
 }
+
